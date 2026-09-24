@@ -66,6 +66,15 @@ var (
 		},
 	)
 
+	currentKVSizeGauge = prometheus.NewGauge(
+		prometheus.GaugeOpts{
+			Namespace: "etcd",
+			Subsystem: "mvcc",
+			Name:      "current_kv_size_in_bytes",
+			Help:      "Total size of keys and values in the current non-deleted KV state in bytes.",
+		},
+	)
+
 	watchStreamGauge = prometheus.NewGauge(
 		prometheus.GaugeOpts{
 			Namespace: "etcd_debugging",
@@ -292,6 +301,7 @@ func init() {
 	prometheus.MustRegister(deleteCounter)
 	prometheus.MustRegister(txnCounter)
 	prometheus.MustRegister(keysGauge)
+	prometheus.MustRegister(currentKVSizeGauge)
 	prometheus.MustRegister(watchStreamGauge)
 	prometheus.MustRegister(watcherGauge)
 	prometheus.MustRegister(slowWatcherGauge)

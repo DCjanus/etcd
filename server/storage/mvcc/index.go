@@ -26,8 +26,8 @@ type index interface {
 	Range(key, end []byte, atRev int64, limit int, withTotalCount bool) (keys [][]byte, modifies, creates []Revision, versions []int64, totalCount int)
 	Revisions(key, end []byte, atRev int64, limit int, withTotalCount bool) ([]Revision, int)
 	CountRevisions(key, end []byte, atRev int64) int
-	Put(key []byte, rev Revision)
-	Tombstone(key []byte, rev Revision) error
+	Put(key []byte, rev Revision, valueSize int64) int64
+	Tombstone(key []byte, rev Revision) (int64, error)
 	Compact(rev int64) map[Revision]struct{}
 	Keep(rev int64) map[Revision]struct{}
 	Equal(b index) bool
@@ -51,18 +51,24 @@ func newTreeIndex(lg *zap.Logger) index {
 	}
 }
 
-func (ti *treeIndex) Put(key []byte, rev Revision) {
+// Put returns the change in the size of live key and value bytes.
+func (ti *treeIndex) Put(key []byte, rev Revision, valueSize int64) int64 {
 	keyi := &keyIndex{key: key}
+	newSize := int64(len(key)) + valueSize
 
 	ti.Lock()
 	defer ti.Unlock()
 	okeyi, ok := ti.tree.Get(keyi)
 	if !ok {
 		keyi.put(ti.lg, rev.Main, rev.Sub)
+		keyi.liveSize = newSize
 		ti.tree.ReplaceOrInsert(keyi)
-		return
+		return newSize
 	}
+	oldSize := okeyi.liveSize
 	okeyi.put(ti.lg, rev.Main, rev.Sub)
+	okeyi.liveSize = newSize
+	return newSize - oldSize
 }
 
 func (ti *treeIndex) Get(key []byte, atRev int64) (modified, created Revision, ver int64, err error) {
@@ -189,17 +195,22 @@ func (ti *treeIndex) Range(key, end []byte, atRev int64, limit int, withTotalCou
 	return keys, modifies, creates, versions, totalCount
 }
 
-func (ti *treeIndex) Tombstone(key []byte, rev Revision) error {
+// Tombstone returns the size removed from the live key and value bytes.
+func (ti *treeIndex) Tombstone(key []byte, rev Revision) (int64, error) {
 	keyi := &keyIndex{key: key}
 
 	ti.Lock()
 	defer ti.Unlock()
 	ki, ok := ti.tree.Get(keyi)
 	if !ok {
-		return ErrRevisionNotFound
+		return 0, ErrRevisionNotFound
 	}
-
-	return ki.tombstone(ti.lg, rev.Main, rev.Sub)
+	if err := ki.tombstone(ti.lg, rev.Main, rev.Sub); err != nil {
+		return 0, err
+	}
+	oldSize := ki.liveSize
+	ki.liveSize = 0
+	return oldSize, nil
 }
 
 func (ti *treeIndex) Compact(rev int64) map[Revision]struct{} {

@@ -216,7 +216,7 @@ func (tw *storeTxnWrite) End() {
 	}
 	tw.tx.Unlock()
 	if tw.liveSizeDelta != 0 {
-		currentKVSizeGauge.Add(float64(tw.liveSizeDelta))
+		liveKVPayloadGauge.Add(float64(tw.liveSizeDelta))
 	}
 	if len(tw.changes) != 0 {
 		tw.s.revMu.Unlock()

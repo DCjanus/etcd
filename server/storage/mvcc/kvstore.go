@@ -342,7 +342,7 @@ func (s *store) restore() error {
 	scheduledCompact, _ := UnsafeReadScheduledCompact(tx)
 	// index keys concurrently as they're loaded in from tx
 	keysGauge.Set(0)
-	currentKVSizeGauge.Set(0)
+	liveKVPayloadGauge.Set(0)
 	rkvc, revc := restoreIntoIndex(s.lg, s.kvindex)
 	for {
 		keys, vals := tx.UnsafeRange(schema.Key, min, max, int64(restoreChunkKeys))
@@ -367,7 +367,7 @@ func (s *store) restore() error {
 		s.revMu.Lock()
 		restored := <-revc
 		s.currentRev = restored.revision
-		currentKVSizeGauge.Set(float64(restored.liveSize))
+		liveKVPayloadGauge.Set(float64(restored.liveSize))
 
 		// keys in the range [compacted revision -N, compaction] might all be deleted due to compaction.
 		// the correct revision should be set to compaction revision in the case, not the largest revision

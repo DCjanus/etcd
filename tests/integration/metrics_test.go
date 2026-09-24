@@ -42,7 +42,7 @@ func TestMetricDbSizeBoot(t *testing.T) {
 	require.NotEqualf(t, "0", v, "expected non-zero, got %q", v)
 }
 
-func TestMetricCurrentKVSize(t *testing.T) {
+func TestMetricLiveKVPayload(t *testing.T) {
 	integration.BeforeTest(t)
 	clus := integration.NewCluster(t, &integration.ClusterConfig{Size: 1})
 	defer clus.Terminate(t)
@@ -50,7 +50,7 @@ func TestMetricCurrentKVSize(t *testing.T) {
 	kvc := integration.ToGRPC(clus.Client(0)).KV
 	checkSize := func(want int) {
 		t.Helper()
-		value, err := clus.Members[0].Metric("etcd_mvcc_current_kv_size_in_bytes")
+		value, err := clus.Members[0].Metric("etcd_mvcc_live_kv_payload_bytes")
 		require.NoError(t, err)
 		got, err := strconv.Atoi(value)
 		require.NoError(t, err)

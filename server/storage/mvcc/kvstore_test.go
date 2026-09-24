@@ -58,15 +58,15 @@ func TestStoreRev(t *testing.T) {
 	}
 }
 
-func TestStoreCurrentKVSize(t *testing.T) {
+func TestStoreLiveKVPayload(t *testing.T) {
 	b, _ := betesting.NewDefaultTmpBackend(t)
 	s := NewStore(zaptest.NewLogger(t), b, &lease.FakeLessor{}, StoreConfig{})
 	defer cleanup(s, b)
 
 	checkSize := func(want int) {
 		t.Helper()
-		if got := readGaugeInt(currentKVSizeGauge); got != want {
-			t.Fatalf("current KV size = %d, want %d", got, want)
+		if got := readGaugeInt(liveKVPayloadGauge); got != want {
+			t.Fatalf("live KV payload = %d, want %d", got, want)
 		}
 	}
 	checkSize(0)

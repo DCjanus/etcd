@@ -1,0 +1,39 @@
+name: MVCC payload validation
+
+on:
+  push:
+    branches:
+      - feat/mvcc-live-kv-size-review
+
+permissions:
+  contents: read
+
+jobs:
+  mvcc-tests:
+    name: MVCC tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: .go-version
+          cache: false
+      - name: MVCC unit tests
+        working-directory: server
+        run: go test ./storage/mvcc -count=1
+      - name: Payload metric integration test
+        working-directory: tests
+        run: go test ./integration -run '^TestMetricLiveKVPayload$' -count=1
+
+  verify:
+    name: make verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: .go-version
+          cache: false
+      - run: make verify

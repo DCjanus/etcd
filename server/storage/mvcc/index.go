@@ -51,7 +51,6 @@ func newTreeIndex(lg *zap.Logger) index {
 	}
 }
 
-// Put returns the change in the size of live key and value bytes.
 func (ti *treeIndex) Put(key []byte, rev Revision, valueSize int64) int64 {
 	keyi := &keyIndex{key: key}
 	newSize := int64(len(key)) + valueSize
@@ -195,7 +194,6 @@ func (ti *treeIndex) Range(key, end []byte, atRev int64, limit int, withTotalCou
 	return keys, modifies, creates, versions, totalCount
 }
 
-// Tombstone returns the size removed from the live key and value bytes.
 func (ti *treeIndex) Tombstone(key []byte, rev Revision) (int64, error) {
 	keyi := &keyIndex{key: key}
 

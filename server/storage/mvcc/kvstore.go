@@ -343,7 +343,7 @@ func (s *store) restore() error {
 	// index keys concurrently as they're loaded in from tx
 	keysGauge.Set(0)
 	liveKVPayloadGauge.Set(0)
-	rkvc, revc := restoreIntoIndex(s.lg, s.kvindex)
+	rkvc, resultc := restoreIntoIndex(s.lg, s.kvindex)
 	for {
 		keys, vals := tx.UnsafeRange(schema.Key, min, max, int64(restoreChunkKeys))
 		if len(keys) == 0 {
@@ -365,7 +365,7 @@ func (s *store) restore() error {
 
 	{
 		s.revMu.Lock()
-		restored := <-revc
+		restored := <-resultc
 		s.currentRev = restored.revision
 		liveKVPayloadGauge.Set(float64(restored.liveSize))
 
@@ -440,11 +440,11 @@ type restoreResult struct {
 }
 
 func restoreIntoIndex(lg *zap.Logger, idx index) (chan<- revKeyValue, <-chan restoreResult) {
-	rkvc, revc := make(chan revKeyValue, restoreChunkKeys), make(chan restoreResult, 1)
+	rkvc, resultc := make(chan revKeyValue, restoreChunkKeys), make(chan restoreResult, 1)
 	go func() {
 		currentRev := int64(1)
 		var liveSize int64
-		defer func() { revc <- restoreResult{revision: currentRev, liveSize: liveSize} }()
+		defer func() { resultc <- restoreResult{revision: currentRev, liveSize: liveSize} }()
 		// restore the tree index from streaming the unordered index.
 		kiCache := make(map[string]*keyIndex, restoreChunkKeys)
 		for rkv := range rkvc {
@@ -503,7 +503,7 @@ func restoreIntoIndex(lg *zap.Logger, idx index) (chan<- revKeyValue, <-chan res
 			ki.liveSize = newSize
 		}
 	}()
-	return rkvc, revc
+	return rkvc, resultc
 }
 
 func restoreChunk(lg *zap.Logger, kvc chan<- revKeyValue, keys, vals [][]byte, keyToLease map[string]lease.LeaseID) {

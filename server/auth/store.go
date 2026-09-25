@@ -1210,12 +1210,12 @@ func (as *authStore) WithRoot(ctx context.Context) context.Context {
 }
 
 func (as *authStore) rootJWT(ctx context.Context, jwt *tokenJWT, revision uint64) (string, error) {
-	// JWT expiry is rounded down to a whole second by tokenJWT.assign. Avoid
-	// reusing a token close to expiry, including when the configured TTL is short.
-	cacheTTL := min(rootJWTCacheTTL, jwt.ttl-time.Second)
-	if cacheTTL <= 0 {
+	// tokenJWT.assign rounds expiry down to whole seconds. Reserve one second
+	// for that truncation and another for the caller to use the cached token.
+	if jwt.ttl <= 2*time.Second {
 		return jwt.assign(ctx, rootUser, revision)
 	}
+	cacheTTL := min(rootJWTCacheTTL, jwt.ttl-2*time.Second)
 
 	as.rootJWTMu.Lock()
 	defer as.rootJWTMu.Unlock()

@@ -1129,18 +1129,22 @@ func TestWithRootCachesJWTWithinAuthRevision(t *testing.T) {
 }
 
 func TestWithRootDoesNotCacheShortLivedJWT(t *testing.T) {
-	core, logs := observer.New(zap.DebugLevel)
-	lg := zap.New(core)
-	opts := fmt.Sprintf("%s,ttl=1s", testJWTOpts())
-	tp, err := NewTokenProvider(lg, opts, dummyIndexWaiter, simpleTokenTTLDefault)
-	require.NoError(t, err)
-	as := NewAuthStore(lg, newBackendMock(), tp, bcrypt.MinCost)
-	defer as.Close()
-	require.NoError(t, enableAuthAndCreateRoot(as))
+	for _, ttl := range []string{"1s", "2s"} {
+		t.Run(ttl, func(t *testing.T) {
+			core, logs := observer.New(zap.DebugLevel)
+			lg := zap.New(core)
+			opts := fmt.Sprintf("%s,ttl=%s", testJWTOpts(), ttl)
+			tp, err := NewTokenProvider(lg, opts, dummyIndexWaiter, simpleTokenTTLDefault)
+			require.NoError(t, err)
+			as := NewAuthStore(lg, newBackendMock(), tp, bcrypt.MinCost)
+			defer as.Close()
+			require.NoError(t, enableAuthAndCreateRoot(as))
 
-	as.WithRoot(t.Context())
-	as.WithRoot(t.Context())
-	require.Len(t, logs.FilterMessage("created/assigned a new JWT token").All(), 2)
+			as.WithRoot(t.Context())
+			as.WithRoot(t.Context())
+			require.Len(t, logs.FilterMessage("created/assigned a new JWT token").All(), 2)
+		})
+	}
 }
 
 func TestWithRootDoesNotCacheSimpleToken(t *testing.T) {

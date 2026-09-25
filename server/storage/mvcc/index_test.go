@@ -280,20 +280,26 @@ func TestIndexRange(t *testing.T) {
 
 func TestIndexTombstone(t *testing.T) {
 	ti := newTreeIndex(zaptest.NewLogger(t))
-	ti.Put([]byte("foo"), Revision{Main: 1}, 0)
+	ti.Put([]byte("foo"), Revision{Main: 1}, 2)
 
-	_, err := ti.Tombstone([]byte("foo"), Revision{Main: 2})
+	sizeDelta, err := ti.Tombstone([]byte("foo"), Revision{Main: 2})
 	if err != nil {
 		t.Errorf("tombstone error = %v, want nil", err)
+	}
+	if sizeDelta != -5 {
+		t.Errorf("tombstone size delta = %d, want -5", sizeDelta)
 	}
 
 	_, _, _, err = ti.Get([]byte("foo"), 2)
 	if !errors.Is(err, ErrRevisionNotFound) {
 		t.Errorf("get error = %v, want ErrRevisionNotFound", err)
 	}
-	_, err = ti.Tombstone([]byte("foo"), Revision{Main: 3})
+	sizeDelta, err = ti.Tombstone([]byte("foo"), Revision{Main: 3})
 	if !errors.Is(err, ErrRevisionNotFound) {
 		t.Errorf("tombstone error = %v, want %v", err, ErrRevisionNotFound)
+	}
+	if sizeDelta != 0 {
+		t.Errorf("failed tombstone size delta = %d, want 0", sizeDelta)
 	}
 }
 

@@ -26,8 +26,10 @@ type index interface {
 	Range(key, end []byte, atRev int64, limit int, withTotalCount bool) (keys [][]byte, modifies, creates []Revision, versions []int64, totalCount int)
 	Revisions(key, end []byte, atRev int64, limit int, withTotalCount bool) ([]Revision, int)
 	CountRevisions(key, end []byte, atRev int64) int
-	Put(key []byte, rev Revision, valueSize int64) int64
-	Tombstone(key []byte, rev Revision) (int64, error)
+	// Put returns the change in live key and value bytes.
+	Put(key []byte, rev Revision, valueSize int64) (sizeDelta int64)
+	// Tombstone returns the negative size of the deleted live key and value.
+	Tombstone(key []byte, rev Revision) (sizeDelta int64, err error)
 	Compact(rev int64) map[Revision]struct{}
 	Keep(rev int64) map[Revision]struct{}
 	Equal(b index) bool
@@ -208,7 +210,7 @@ func (ti *treeIndex) Tombstone(key []byte, rev Revision) (int64, error) {
 	}
 	oldSize := ki.liveSize
 	ki.liveSize = 0
-	return oldSize, nil
+	return -oldSize, nil
 }
 
 func (ti *treeIndex) Compact(rev int64) map[Revision]struct{} {

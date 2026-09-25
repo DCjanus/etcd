@@ -325,7 +325,7 @@ func (tw *storeTxnWrite) delete(key []byte) {
 	}
 
 	tw.tx.UnsafeSeqPut(schema.Key, ibytes, d)
-	removedSize, err := tw.s.kvindex.Tombstone(key, idxRev.Revision)
+	sizeDelta, err := tw.s.kvindex.Tombstone(key, idxRev.Revision)
 	if err != nil {
 		tw.storeTxnCommon.s.lg.Fatal(
 			"failed to tombstone an existing key",
@@ -333,7 +333,7 @@ func (tw *storeTxnWrite) delete(key []byte) {
 			zap.Error(err),
 		)
 	}
-	tw.liveSizeDelta -= removedSize
+	tw.liveSizeDelta += sizeDelta
 	tw.changes = append(tw.changes, kv)
 
 	item := lease.LeaseItem{Key: string(key)}

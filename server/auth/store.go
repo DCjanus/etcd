@@ -69,8 +69,10 @@ var (
 )
 
 const (
-	rootUser = "root"
-	rootRole = "root"
+	rootUser           = "root"
+	rootRole           = "root"
+	rootJWTCacheTTL    = 10 * time.Second
+	rootJWTMinValidity = 10 * time.Second
 
 	tokenTypeSimple = "simple"
 	tokenTypeJWT    = "jwt"
@@ -261,6 +263,11 @@ type authStore struct {
 
 	tokenProvider TokenProvider
 	bcryptCost    int // the algorithm cost / strength for hashing auth passwords
+
+	rootJWTMu    sync.Mutex
+	rootJWTToken string
+	rootJWTRev   uint64
+	rootJWTUntil time.Time
 }
 
 func (as *authStore) AuthEnable() error {
@@ -1177,7 +1184,14 @@ func (as *authStore) WithRoot(ctx context.Context) context.Context {
 		ctxForAssign = ctx
 	}
 
-	token, err := as.tokenProvider.assign(ctxForAssign, "root", as.Revision())
+	revision := as.Revision()
+	var token string
+	var err error
+	if jwt, ok := as.tokenProvider.(*tokenJWT); ok {
+		token, err = as.rootJWT(ctxForAssign, jwt, revision)
+	} else {
+		token, err = as.tokenProvider.assign(ctxForAssign, rootUser, revision)
+	}
 	if err != nil {
 		// this must not happen
 		as.lg.Error(
@@ -1194,6 +1208,32 @@ func (as *authStore) WithRoot(ctx context.Context) context.Context {
 
 	// use "mdIncomingKey{}" since it's called from local etcdserver
 	return metadata.NewIncomingContext(ctx, tokenMD)
+}
+
+func (as *authStore) rootJWT(ctx context.Context, jwt *tokenJWT, revision uint64) (string, error) {
+	// tokenJWT.assign truncates expiry to seconds. Reserve one second for that
+	// truncation and 10s for delayed validation, such as a health Range waiting
+	// for a linearizable read. Sign short-lived JWTs on every call instead.
+	if jwt.ttl <= rootJWTMinValidity+time.Second {
+		return jwt.assign(ctx, rootUser, revision)
+	}
+	cacheTTL := min(rootJWTCacheTTL, jwt.ttl-rootJWTMinValidity-time.Second)
+
+	as.rootJWTMu.Lock()
+	defer as.rootJWTMu.Unlock()
+	now := time.Now()
+	if as.rootJWTToken != "" && as.rootJWTRev == revision && now.Before(as.rootJWTUntil) {
+		return as.rootJWTToken, nil
+	}
+
+	token, err := jwt.assign(ctx, rootUser, revision)
+	if err != nil {
+		return "", err
+	}
+	as.rootJWTToken = token
+	as.rootJWTRev = revision
+	as.rootJWTUntil = now.Add(cacheTTL)
+	return token, nil
 }
 
 func (as *authStore) HasRole(user, role string) bool {

@@ -26,7 +26,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.uber.org/zap"
 	"go.uber.org/zap/zaptest"
+	"go.uber.org/zap/zaptest/observer"
 	"golang.org/x/crypto/bcrypt"
 	"google.golang.org/grpc/metadata"
 
@@ -1096,6 +1098,65 @@ func TestAuthInfoFromCtxWithRootSimple(t *testing.T) {
 func TestAuthInfoFromCtxWithRootJWT(t *testing.T) {
 	opts := testJWTOpts()
 	testAuthInfoFromCtxWithRoot(t, opts)
+}
+
+func TestWithRootCachesJWTWithinAuthRevision(t *testing.T) {
+	core, logs := observer.New(zap.DebugLevel)
+	lg := zap.New(core)
+	tp, err := NewTokenProvider(lg, testJWTOpts(), dummyIndexWaiter, simpleTokenTTLDefault)
+	require.NoError(t, err)
+	as := NewAuthStore(lg, newBackendMock(), tp, bcrypt.MinCost).(*authStore)
+	defer as.Close()
+	require.NoError(t, enableAuthAndCreateRoot(as))
+
+	rootToken := func() string {
+		md, ok := metadata.FromIncomingContext(as.WithRoot(t.Context()))
+		require.True(t, ok)
+		return md.Get(rpctypes.TokenFieldNameGRPC)[0]
+	}
+
+	first := rootToken()
+	require.Equal(t, first, rootToken())
+	require.Len(t, logs.FilterMessage("created/assigned a new JWT token").All(), 1)
+	as.rootJWTMu.Lock()
+	as.rootJWTUntil = time.Now().Add(-time.Second)
+	as.rootJWTMu.Unlock()
+	rootToken()
+	require.Len(t, logs.FilterMessage("created/assigned a new JWT token").All(), 2)
+	as.setRevision(as.Revision() + 1)
+	require.NotEqual(t, first, rootToken())
+	require.Len(t, logs.FilterMessage("created/assigned a new JWT token").All(), 3)
+}
+
+func TestWithRootDoesNotCacheShortLivedJWT(t *testing.T) {
+	for _, ttl := range []string{"1s", "2s", "3s", "10s"} {
+		t.Run(ttl, func(t *testing.T) {
+			core, logs := observer.New(zap.DebugLevel)
+			lg := zap.New(core)
+			opts := fmt.Sprintf("%s,ttl=%s", testJWTOpts(), ttl)
+			tp, err := NewTokenProvider(lg, opts, dummyIndexWaiter, simpleTokenTTLDefault)
+			require.NoError(t, err)
+			as := NewAuthStore(lg, newBackendMock(), tp, bcrypt.MinCost)
+			defer as.Close()
+			require.NoError(t, enableAuthAndCreateRoot(as))
+
+			as.WithRoot(t.Context())
+			as.WithRoot(t.Context())
+			require.Len(t, logs.FilterMessage("created/assigned a new JWT token").All(), 2)
+		})
+	}
+}
+
+func TestWithRootDoesNotCacheSimpleToken(t *testing.T) {
+	tp, err := NewTokenProvider(zaptest.NewLogger(t), tokenTypeSimple, dummyIndexWaiter, simpleTokenTTLDefault)
+	require.NoError(t, err)
+	as := NewAuthStore(zaptest.NewLogger(t), newBackendMock(), tp, bcrypt.MinCost)
+	defer as.Close()
+	require.NoError(t, enableAuthAndCreateRoot(as))
+
+	first, _ := metadata.FromIncomingContext(as.WithRoot(t.Context()))
+	second, _ := metadata.FromIncomingContext(as.WithRoot(t.Context()))
+	require.NotEqual(t, first.Get(rpctypes.TokenFieldNameGRPC), second.Get(rpctypes.TokenFieldNameGRPC))
 }
 
 // testAuthInfoFromCtxWithRoot ensures "WithRoot" properly embeds token in the context.

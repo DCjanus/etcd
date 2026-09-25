@@ -1073,6 +1073,9 @@ type indexRangeEventsResp struct {
 	revs []Revision
 }
 
+// fakeIndex records calls to the index but does not model per-key live sizes.
+// Its Put and Tombstone methods return zero size deltas, so tests using this
+// fake cannot verify liveKVPayloadGauge; use a real treeIndex for that.
 type fakeIndex struct {
 	testutil.Recorder
 	indexGetRespc         chan indexGetResp

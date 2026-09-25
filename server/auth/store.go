@@ -81,6 +81,10 @@ type AuthInfo struct {
 	Revision uint64
 }
 
+// internalRootContextKey is only set by AuthStore.WithRootInternal. Context
+// values do not cross the RPC boundary, unlike incoming metadata.
+type internalRootContextKey struct{}
+
 // AuthenticateParamIndex is used for a key of context in the parameters of Authenticate()
 type AuthenticateParamIndex struct{}
 
@@ -176,6 +180,9 @@ type AuthStore interface {
 
 	// WithRoot generates and installs a token that can be used as a root credential
 	WithRoot(ctx context.Context) context.Context
+
+	// WithRootInternal marks an in-process request as root without issuing a token.
+	WithRootInternal(ctx context.Context) context.Context
 
 	// HasRole checks that user has role
 	HasRole(user, role string) bool
@@ -1057,6 +1064,9 @@ func (as *authStore) AuthInfoFromCtx(ctx context.Context) (*AuthInfo, error) {
 	if !as.IsAuthEnabled() {
 		return nil, nil
 	}
+	if revision, ok := ctx.Value(internalRootContextKey{}).(uint64); ok {
+		return &AuthInfo{Username: rootUser, Revision: revision}, nil
+	}
 
 	md, ok := metadata.FromIncomingContext(ctx)
 	if !ok {
@@ -1194,6 +1204,14 @@ func (as *authStore) WithRoot(ctx context.Context) context.Context {
 
 	// use "mdIncomingKey{}" since it's called from local etcdserver
 	return metadata.NewIncomingContext(ctx, tokenMD)
+}
+
+func (as *authStore) WithRootInternal(ctx context.Context) context.Context {
+	if !as.IsAuthEnabled() {
+		return ctx
+	}
+	// Stamp the auth revision at request creation, as a root token would.
+	return context.WithValue(ctx, internalRootContextKey{}, as.Revision())
 }
 
 func (as *authStore) HasRole(user, role string) bool {

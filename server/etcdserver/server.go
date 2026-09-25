@@ -877,7 +877,7 @@ func (s *EtcdServer) revokeExpiredLeases(leases []*lease.Lease) {
 
 			f := func(lid int64) {
 				s.GoAttach(func() {
-					ctx := s.authStore.WithRoot(s.ctx)
+					ctx := s.authStore.WithRootInternal(s.ctx)
 					_, lerr := s.LeaseRevoke(ctx, &pb.LeaseRevokeRequest{ID: lid})
 					if lerr == nil {
 						leaseExpired.Inc()

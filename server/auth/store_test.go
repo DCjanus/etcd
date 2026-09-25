@@ -1098,6 +1098,47 @@ func TestAuthInfoFromCtxWithRootJWT(t *testing.T) {
 	testAuthInfoFromCtxWithRoot(t, opts)
 }
 
+func TestWithRootInternal(t *testing.T) {
+	for _, opts := range []string{tokenTypeSimple, testJWTOpts()} {
+		t.Run(opts, func(t *testing.T) {
+			tp, err := NewTokenProvider(zaptest.NewLogger(t), opts, dummyIndexWaiter, simpleTokenTTLDefault)
+			require.NoError(t, err)
+			as := NewAuthStore(zaptest.NewLogger(t), newBackendMock(), tp, bcrypt.MinCost).(*authStore)
+			defer as.Close()
+			require.NoError(t, enableAuthAndCreateRoot(as))
+
+			ctx := as.WithRootInternal(t.Context())
+			_, hasMetadata := metadata.FromIncomingContext(ctx)
+			require.False(t, hasMetadata)
+			ai, err := as.AuthInfoFromCtx(ctx)
+			require.NoError(t, err)
+			require.Equal(t, &AuthInfo{Username: rootUser, Revision: as.Revision()}, ai)
+			require.NoError(t, as.IsRangePermitted(ai, []byte("key"), nil))
+
+			as.setRevision(as.Revision() + 1)
+			require.ErrorIs(t, as.IsRangePermitted(ai, []byte("key"), nil), ErrAuthOldRevision)
+			fresh, err := as.AuthInfoFromCtx(as.WithRootInternal(t.Context()))
+			require.NoError(t, err)
+			require.NoError(t, as.IsRangePermitted(fresh, []byte("key"), nil))
+		})
+	}
+}
+
+func TestWithRootInternalOverridesIncomingToken(t *testing.T) {
+	tp, err := NewTokenProvider(zaptest.NewLogger(t), testJWTOpts(), dummyIndexWaiter, simpleTokenTTLDefault)
+	require.NoError(t, err)
+	as := NewAuthStore(zaptest.NewLogger(t), newBackendMock(), tp, bcrypt.MinCost)
+	defer as.Close()
+	require.NoError(t, enableAuthAndCreateRoot(as))
+
+	ctx := metadata.NewIncomingContext(t.Context(), metadata.Pairs(rpctypes.TokenFieldNameGRPC, "invalid"))
+	_, err = as.AuthInfoFromCtx(ctx)
+	require.ErrorIs(t, err, ErrInvalidAuthToken)
+	ai, err := as.AuthInfoFromCtx(as.WithRootInternal(ctx))
+	require.NoError(t, err)
+	require.Equal(t, rootUser, ai.Username)
+}
+
 // testAuthInfoFromCtxWithRoot ensures "WithRoot" properly embeds token in the context.
 func testAuthInfoFromCtxWithRoot(t *testing.T, opts string) {
 	tp, err := NewTokenProvider(zaptest.NewLogger(t), opts, dummyIndexWaiter, simpleTokenTTLDefault)

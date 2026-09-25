@@ -1129,7 +1129,7 @@ func TestWithRootCachesJWTWithinAuthRevision(t *testing.T) {
 }
 
 func TestWithRootDoesNotCacheShortLivedJWT(t *testing.T) {
-	for _, ttl := range []string{"1s", "2s"} {
+	for _, ttl := range []string{"1s", "2s", "3s", "10s"} {
 		t.Run(ttl, func(t *testing.T) {
 			core, logs := observer.New(zap.DebugLevel)
 			lg := zap.New(core)

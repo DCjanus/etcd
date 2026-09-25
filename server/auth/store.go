@@ -69,9 +69,10 @@ var (
 )
 
 const (
-	rootUser        = "root"
-	rootRole        = "root"
-	rootJWTCacheTTL = 10 * time.Second
+	rootUser           = "root"
+	rootRole           = "root"
+	rootJWTCacheTTL    = 10 * time.Second
+	rootJWTMinValidity = 10 * time.Second
 
 	tokenTypeSimple = "simple"
 	tokenTypeJWT    = "jwt"
@@ -1210,12 +1211,13 @@ func (as *authStore) WithRoot(ctx context.Context) context.Context {
 }
 
 func (as *authStore) rootJWT(ctx context.Context, jwt *tokenJWT, revision uint64) (string, error) {
-	// tokenJWT.assign rounds expiry down to whole seconds. Reserve one second
-	// for that truncation and another for the caller to use the cached token.
-	if jwt.ttl <= 2*time.Second {
+	// tokenJWT.assign truncates expiry to seconds. Reserve one second for that
+	// truncation and 10s for delayed validation, such as a health Range waiting
+	// for a linearizable read. Sign short-lived JWTs on every call instead.
+	if jwt.ttl <= rootJWTMinValidity+time.Second {
 		return jwt.assign(ctx, rootUser, revision)
 	}
-	cacheTTL := min(rootJWTCacheTTL, jwt.ttl-2*time.Second)
+	cacheTTL := min(rootJWTCacheTTL, jwt.ttl-rootJWTMinValidity-time.Second)
 
 	as.rootJWTMu.Lock()
 	defer as.rootJWTMu.Unlock()

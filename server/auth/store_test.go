@@ -1099,29 +1099,90 @@ func TestAuthInfoFromCtxWithRootJWT(t *testing.T) {
 }
 
 func TestWithRootInternal(t *testing.T) {
-	for _, opts := range []string{tokenTypeSimple, testJWTOpts()} {
-		t.Run(opts, func(t *testing.T) {
-			tp, err := NewTokenProvider(zaptest.NewLogger(t), opts, dummyIndexWaiter, simpleTokenTTLDefault)
+	for _, tc := range []struct {
+		name        string
+		opts        string
+		hasMetadata bool
+	}{
+		{name: "simple", opts: tokenTypeSimple, hasMetadata: true},
+		{name: "jwt", opts: testJWTOpts()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tp, err := NewTokenProvider(zaptest.NewLogger(t), tc.opts, dummyIndexWaiter, simpleTokenTTLDefault)
+			require.NoError(t, err)
+			as := NewAuthStore(zaptest.NewLogger(t), newBackendMock(), tp, bcrypt.MinCost).(*authStore)
+			defer as.Close()
+			unauthenticatedCtx := t.Context()
+			require.Same(t, unauthenticatedCtx, WithRootInternal(unauthenticatedCtx, as))
+			require.NoError(t, enableAuthAndCreateRoot(as))
+
+			ctx := WithRootInternal(t.Context(), as)
+			_, hasMetadata := metadata.FromIncomingContext(ctx)
+			require.Equal(t, tc.hasMetadata, hasMetadata)
+			ai, err := as.AuthInfoFromCtx(ctx)
+			require.NoError(t, err)
+			require.Equal(t, &AuthInfo{Username: rootUser, Revision: as.Revision()}, ai)
+			require.NoError(t, as.IsRangePermitted(ai, []byte("key"), nil))
+		})
+	}
+}
+
+func TestWithRootInternalPreservesTokenRevisionSemantics(t *testing.T) {
+	for _, tc := range []struct {
+		name              string
+		opts              string
+		snapshotsRevision bool
+	}{
+		{name: "simple", opts: tokenTypeSimple},
+		{name: "jwt", opts: testJWTOpts(), snapshotsRevision: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tp, err := NewTokenProvider(zaptest.NewLogger(t), tc.opts, dummyIndexWaiter, simpleTokenTTLDefault)
 			require.NoError(t, err)
 			as := NewAuthStore(zaptest.NewLogger(t), newBackendMock(), tp, bcrypt.MinCost).(*authStore)
 			defer as.Close()
 			require.NoError(t, enableAuthAndCreateRoot(as))
 
-			ctx := as.WithRootInternal(t.Context())
-			_, hasMetadata := metadata.FromIncomingContext(ctx)
-			require.False(t, hasMetadata)
-			ai, err := as.AuthInfoFromCtx(ctx)
+			oldCtx := as.WithRoot(t.Context())
+			internalCtx := WithRootInternal(t.Context(), as)
+			oldRevision := as.Revision()
+			_, err = as.RoleAdd(&pb.AuthRoleAddRequest{Name: "unrelated"})
 			require.NoError(t, err)
-			require.Equal(t, &AuthInfo{Username: rootUser, Revision: as.Revision()}, ai)
-			require.NoError(t, as.IsRangePermitted(ai, []byte("key"), nil))
+			require.Greater(t, as.Revision(), oldRevision)
 
-			as.setRevision(as.Revision() + 1)
-			require.ErrorIs(t, as.IsRangePermitted(ai, []byte("key"), nil), ErrAuthOldRevision)
-			fresh, err := as.AuthInfoFromCtx(as.WithRootInternal(t.Context()))
-			require.NoError(t, err)
-			require.NoError(t, as.IsRangePermitted(fresh, []byte("key"), nil))
+			wantRevision := as.Revision()
+			if tc.snapshotsRevision {
+				wantRevision = oldRevision
+			}
+			for _, ctx := range []context.Context{oldCtx, internalCtx} {
+				ai, err := as.AuthInfoFromCtx(ctx)
+				require.NoError(t, err)
+				require.Equal(t, &AuthInfo{Username: rootUser, Revision: wantRevision}, ai)
+				if tc.snapshotsRevision {
+					require.ErrorIs(t, as.IsRangePermitted(ai, []byte("key"), nil), ErrAuthOldRevision)
+				} else {
+					require.NoError(t, as.IsRangePermitted(ai, []byte("key"), nil))
+				}
+			}
 		})
 	}
+}
+
+type wrappedAuthStore struct {
+	AuthStore
+	withRootCalled bool
+}
+
+func (as *wrappedAuthStore) WithRoot(ctx context.Context) context.Context {
+	as.withRootCalled = true
+	return ctx
+}
+
+func TestWithRootInternalFallsBackForOtherStores(t *testing.T) {
+	store := &wrappedAuthStore{}
+	ctx := t.Context()
+	require.Same(t, ctx, WithRootInternal(ctx, store))
+	require.True(t, store.withRootCalled)
 }
 
 func TestWithRootInternalOverridesIncomingToken(t *testing.T) {
@@ -1134,7 +1195,7 @@ func TestWithRootInternalOverridesIncomingToken(t *testing.T) {
 	ctx := metadata.NewIncomingContext(t.Context(), metadata.Pairs(rpctypes.TokenFieldNameGRPC, "invalid"))
 	_, err = as.AuthInfoFromCtx(ctx)
 	require.ErrorIs(t, err, ErrInvalidAuthToken)
-	ai, err := as.AuthInfoFromCtx(as.WithRootInternal(ctx))
+	ai, err := as.AuthInfoFromCtx(WithRootInternal(ctx, as))
 	require.NoError(t, err)
 	require.Equal(t, rootUser, ai.Username)
 }

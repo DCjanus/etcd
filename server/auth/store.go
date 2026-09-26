@@ -81,7 +81,7 @@ type AuthInfo struct {
 	Revision uint64
 }
 
-// internalRootContextKey is only set by AuthStore.WithRootInternal. Context
+// internalRootContextKey is only set by WithRootInternal. Context
 // values do not cross the RPC boundary, unlike incoming metadata.
 type internalRootContextKey struct{}
 
@@ -180,9 +180,6 @@ type AuthStore interface {
 
 	// WithRoot generates and installs a token that can be used as a root credential
 	WithRoot(ctx context.Context) context.Context
-
-	// WithRootInternal marks an in-process request as root without issuing a token.
-	WithRootInternal(ctx context.Context) context.Context
 
 	// HasRole checks that user has role
 	HasRole(user, role string) bool
@@ -1206,11 +1203,18 @@ func (as *authStore) WithRoot(ctx context.Context) context.Context {
 	return metadata.NewIncomingContext(ctx, tokenMD)
 }
 
-func (as *authStore) WithRootInternal(ctx context.Context) context.Context {
-	if !as.IsAuthEnabled() {
-		return ctx
+// WithRootInternal avoids issuing a token for in-process requests backed by the
+// built-in JWT store. Other stores retain their WithRoot behavior: simple tokens
+// use the current auth revision when they are read, not when they are issued.
+func WithRootInternal(ctx context.Context, store AuthStore) context.Context {
+	as, ok := store.(*authStore)
+	if !ok {
+		return store.WithRoot(ctx)
 	}
-	// Stamp the auth revision at request creation, as a root token would.
+	if _, ok := as.tokenProvider.(*tokenJWT); !ok || !as.IsAuthEnabled() {
+		return store.WithRoot(ctx)
+	}
+	// JWTs carry the auth revision captured when they are issued.
 	return context.WithValue(ctx, internalRootContextKey{}, as.Revision())
 }
 

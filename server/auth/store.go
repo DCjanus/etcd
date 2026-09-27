@@ -85,6 +85,11 @@ type AuthInfo struct {
 // values do not cross the RPC boundary, unlike incoming metadata.
 type internalRootContextKey struct{}
 
+type internalRootContextValue struct {
+	store    *authStore
+	revision uint64
+}
+
 // AuthenticateParamIndex is used for a key of context in the parameters of Authenticate()
 type AuthenticateParamIndex struct{}
 
@@ -1061,8 +1066,8 @@ func (as *authStore) AuthInfoFromCtx(ctx context.Context) (*AuthInfo, error) {
 	if !as.IsAuthEnabled() {
 		return nil, nil
 	}
-	if revision, ok := ctx.Value(internalRootContextKey{}).(uint64); ok {
-		return &AuthInfo{Username: rootUser, Revision: revision}, nil
+	if value, ok := ctx.Value(internalRootContextKey{}).(internalRootContextValue); ok && value.store == as {
+		return &AuthInfo{Username: rootUser, Revision: value.revision}, nil
 	}
 
 	md, ok := metadata.FromIncomingContext(ctx)
@@ -1218,7 +1223,7 @@ func WithRootInternal(ctx context.Context, store AuthStore) context.Context {
 		return store.WithRoot(ctx)
 	}
 	// JWTs carry the auth revision captured when they are issued.
-	return context.WithValue(ctx, internalRootContextKey{}, as.Revision())
+	return context.WithValue(ctx, internalRootContextKey{}, internalRootContextValue{store: as, revision: as.Revision()})
 }
 
 func (as *authStore) HasRole(user, role string) bool {

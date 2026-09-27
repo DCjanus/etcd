@@ -1200,6 +1200,25 @@ func TestWithRootInternalOverridesIncomingToken(t *testing.T) {
 	require.Equal(t, rootUser, ai.Username)
 }
 
+func TestWithRootInternalDoesNotCrossAuthStores(t *testing.T) {
+	stores := make([]AuthStore, 2)
+	for i := range stores {
+		tp, err := NewTokenProvider(zaptest.NewLogger(t), testJWTOpts(), dummyIndexWaiter, simpleTokenTTLDefault)
+		require.NoError(t, err)
+		stores[i] = NewAuthStore(zaptest.NewLogger(t), newBackendMock(), tp, bcrypt.MinCost)
+		defer stores[i].Close()
+		require.NoError(t, enableAuthAndCreateRoot(stores[i]))
+	}
+
+	ctx := WithRootInternal(t.Context(), stores[0])
+	ai, err := stores[0].AuthInfoFromCtx(ctx)
+	require.NoError(t, err)
+	require.Equal(t, rootUser, ai.Username)
+	ai, err = stores[1].AuthInfoFromCtx(ctx)
+	require.NoError(t, err)
+	require.Nil(t, ai)
+}
+
 func TestWithRootInternalVerifyOnlyJWT(t *testing.T) {
 	opts := fmt.Sprintf("%s,pub-key=%s,sign-method=RS256", tokenTypeJWT, jwtRSAPubKey)
 	tp, err := NewTokenProvider(zaptest.NewLogger(t), opts, dummyIndexWaiter, simpleTokenTTLDefault)

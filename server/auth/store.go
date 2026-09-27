@@ -1206,6 +1206,9 @@ func (as *authStore) WithRoot(ctx context.Context) context.Context {
 // WithRootInternal avoids issuing a token for in-process requests backed by the
 // built-in JWT store. Other stores retain their WithRoot behavior: simple tokens
 // use the current auth revision when they are read, not when they are issued.
+// The JWT fast path captures the auth revision but does not create an expiring
+// token. Use its context only for trusted, request-scoped in-process calls, not
+// as a credential for outgoing RPCs.
 func WithRootInternal(ctx context.Context, store AuthStore) context.Context {
 	as, ok := store.(*authStore)
 	if !ok {

@@ -1200,6 +1200,32 @@ func TestWithRootInternalOverridesIncomingToken(t *testing.T) {
 	require.Equal(t, rootUser, ai.Username)
 }
 
+func TestWithRootInternalVerifyOnlyJWT(t *testing.T) {
+	opts := fmt.Sprintf("%s,pub-key=%s,sign-method=RS256", tokenTypeJWT, jwtRSAPubKey)
+	tp, err := NewTokenProvider(zaptest.NewLogger(t), opts, dummyIndexWaiter, simpleTokenTTLDefault)
+	require.NoError(t, err)
+	as := NewAuthStore(zaptest.NewLogger(t), newBackendMock(), tp, bcrypt.MinCost)
+	defer as.Close()
+	require.NoError(t, enableAuthAndCreateRoot(as))
+
+	_, err = tp.assign(t.Context(), rootUser, as.Revision())
+	require.ErrorIs(t, err, ErrVerifyOnly)
+	ctx := t.Context()
+	require.Same(t, ctx, as.WithRoot(ctx))
+
+	invalidCtx := metadata.NewIncomingContext(ctx, metadata.Pairs(rpctypes.TokenFieldNameGRPC, "invalid"))
+	_, err = as.AuthInfoFromCtx(invalidCtx)
+	require.ErrorIs(t, err, ErrInvalidAuthToken)
+
+	internalCtx := WithRootInternal(ctx, as)
+	_, hasMetadata := metadata.FromIncomingContext(internalCtx)
+	require.False(t, hasMetadata)
+	ai, err := as.AuthInfoFromCtx(internalCtx)
+	require.NoError(t, err)
+	require.Equal(t, &AuthInfo{Username: rootUser, Revision: as.Revision()}, ai)
+	require.NoError(t, as.IsRangePermitted(ai, []byte("key"), nil))
+}
+
 // testAuthInfoFromCtxWithRoot ensures "WithRoot" properly embeds token in the context.
 func testAuthInfoFromCtxWithRoot(t *testing.T, opts string) {
 	tp, err := NewTokenProvider(zaptest.NewLogger(t), opts, dummyIndexWaiter, simpleTokenTTLDefault)

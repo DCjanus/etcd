@@ -1029,8 +1029,6 @@ func catchUpDefrag(odb, tmpdb *bolt.DB, lastKeys map[string][]byte, limit int) (
 		}
 	}
 
-	// Persist the final freelist so reopening the defragmented DB does not rebuild it.
-	tmpdb.NoFreelistSync = false
 	return tmptx.Commit()
 }
 

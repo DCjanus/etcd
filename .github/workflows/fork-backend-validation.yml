@@ -1,0 +1,39 @@
+name: Fork backend validation
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: .go-version
+          cache: false
+      - name: Backend tests with race detection
+        run: go test -race -count=1 -timeout=10m ./server/storage/backend
+      - name: Defrag RPC integration test
+        run: go test -tags=integration -run '^TestDefragOnline$' -count=1 -timeout=5m ./tests/common
+      - name: Replay benchmark evidence audit
+        run: |
+          mkdir -p "$RUNNER_TEMP/freelist-evidence"
+          tar -xzf staging-evidence/freelist-evidence.tar.gz -C "$RUNNER_TEMP/freelist-evidence"
+          cd "$RUNNER_TEMP/freelist-evidence"
+          sha256sum -c SHA256SUMS
+          ruby audit.rb .
+          ruby summarize.rb .
+      - name: Retain isolated benchmark evidence
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: freelist-isolated-benchmark
+          path: staging-evidence/
+          retention-days: 7
+          if-no-files-found: error

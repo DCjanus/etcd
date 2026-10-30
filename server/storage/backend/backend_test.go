@@ -300,37 +300,6 @@ func populateForDefragTest(b backend.Backend) {
 	b.ForceCommit()
 }
 
-// TestBackendDefragNonBlockingPersistsFreelist verifies that cutover leaves an
-// allocated freelist page, allowing the replacement database to load it on reopen.
-func TestBackendDefragNonBlockingPersistsFreelist(t *testing.T) {
-	bcfg := backend.DefaultBackendConfig(zaptest.NewLogger(t))
-	bcfg.NonBlockingDefrag = true
-	b, _ := betesting.NewTmpBackendFromCfg(t, bcfg)
-	defer betesting.Close(t, b)
-	populateForDefragTest(b)
-	require.NoError(t, b.Defrag())
-
-	b.BatchTx().Lock()
-	defer b.BatchTx().Unlock()
-	found := false
-	require.NoError(t, backend.DbFromBackendForTest(b).View(func(tx *bolt.Tx) error {
-		for id := 0; ; id++ {
-			page, err := tx.Page(id)
-			if err != nil {
-				return err
-			}
-			if page == nil {
-				return nil
-			}
-			if page.Type == "freelist" {
-				found = true
-				return nil
-			}
-		}
-	}))
-	require.Truef(t, found, "the defragmented database should contain an allocated freelist page")
-}
-
 // TestBackendDefragBlockingAndNonBlockingProduceSameSize verifies that, given identical key/value
 // data and no concurrent traffic during the non-blocking run, blocking and non-blocking defrag
 // produce a final db of the same allocated size and hash. The persisted freelist

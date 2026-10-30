@@ -300,9 +300,41 @@ func populateForDefragTest(b backend.Backend) {
 	b.ForceCommit()
 }
 
+// TestBackendDefragNonBlockingPersistsFreelist verifies that cutover leaves an
+// allocated freelist page, allowing the replacement database to load it on reopen.
+func TestBackendDefragNonBlockingPersistsFreelist(t *testing.T) {
+	bcfg := backend.DefaultBackendConfig(zaptest.NewLogger(t))
+	bcfg.NonBlockingDefrag = true
+	b, _ := betesting.NewTmpBackendFromCfg(t, bcfg)
+	defer betesting.Close(t, b)
+	populateForDefragTest(b)
+	require.NoError(t, b.Defrag())
+
+	b.BatchTx().Lock()
+	defer b.BatchTx().Unlock()
+	found := false
+	require.NoError(t, backend.DbFromBackendForTest(b).View(func(tx *bolt.Tx) error {
+		for id := 0; ; id++ {
+			page, err := tx.Page(id)
+			if err != nil {
+				return err
+			}
+			if page == nil {
+				return nil
+			}
+			if page.Type == "freelist" {
+				found = true
+				return nil
+			}
+		}
+	}))
+	require.Truef(t, found, "the defragmented database should contain an allocated freelist page")
+}
+
 // TestBackendDefragBlockingAndNonBlockingProduceSameSize verifies that, given identical key/value
 // data and no concurrent traffic during the non-blocking run, blocking and non-blocking defrag
-// produce a final db of exactly the same size and hash.
+// produce a final db of the same allocated size and hash. The persisted freelist
+// may require an additional metadata page in the non-blocking path.
 func TestBackendDefragBlockingAndNonBlockingProduceSameSize(t *testing.T) {
 	blockingCfg := backend.DefaultBackendConfig(zaptest.NewLogger(t, zaptest.Level(zap.InfoLevel)))
 	bBlocking, _ := betesting.NewTmpBackendFromCfg(t, blockingCfg)
@@ -330,7 +362,8 @@ func TestBackendDefragBlockingAndNonBlockingProduceSameSize(t *testing.T) {
 	require.NoError(t, bNonBlocking.Defrag())
 
 	assert.Equalf(t, bBlocking.Size(), bNonBlocking.Size(), "blocking and non-blocking defrag should produce a db of exactly the same size when there's no traffic during the non-blocking run")
-	assert.Equal(t, bBlocking.SizeInUse(), bNonBlocking.SizeInUse())
+	// Persisting the freelist can consume one extra page for this fixed fixture.
+	assert.InDelta(t, bBlocking.SizeInUse(), bNonBlocking.SizeInUse(), float64(os.Getpagesize()))
 
 	requireSameHash()
 }
